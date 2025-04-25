@@ -1,8 +1,12 @@
 import sqlite3
 import logging
+from databases import Database
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Global database instance
+database = Database('sqlite:///health_system.db')
 
 def init_db():
     """Initialize SQLite database with programs, clients, and enrollments tables."""
@@ -39,8 +43,47 @@ def init_db():
 
         conn.commit()
         logging.info("Database initialized with programs, clients, and enrollments tables")
+        logging.info("Database available")
     except sqlite3.Error as e:
         logging.error(f"Database initialization failed: {e}")
         raise
     finally:
         conn.close()
+
+async def connect_db():
+    """Connect to the database."""
+    try:
+        await database.connect()
+        logging.info("Database connected")
+        logging.info("Database available for async queries")
+    except Exception as e:
+        logging.error(f"Database connection failed: {e}")
+        raise
+
+async def disconnect_db():
+    """Disconnect from the database."""
+    try:
+        await database.disconnect()
+        logging.info("Database disconnected")
+    except Exception as e:
+        logging.error(f"Database disconnection failed: {e}")
+        raise
+
+async def check_db_status():
+    """Check if database is available and tables exist."""
+    try:
+        query = "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('programs', 'clients', 'enrollments')"
+        tables = await database.fetch_all(query)
+        table_names = [table['name'] for table in tables]
+        return {
+            "status": "available",
+            "tables": table_names,
+            "message": "Database is initialized and connected"
+        }
+    except Exception as e:
+        logging.error(f"Database status check failed: {e}")
+        return {
+            "status": "unavailable",
+            "tables": [],
+            "message": f"Database error: {str(e)}"
+        }
