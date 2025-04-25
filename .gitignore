@@ -1,0 +1,20 @@
+# Python
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+
+# SQLite
+*.db
+*.db-journal
+
+# IDEs
+.vscode/
+.idea/
+
+# Misc
+*.log
