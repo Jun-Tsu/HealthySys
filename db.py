@@ -19,7 +19,7 @@ def init_db():
         # Create programs table
         c.execute('''CREATE TABLE IF NOT EXISTS programs
                      (program_id TEXT PRIMARY KEY,
-                      name TEXT NOT NULL,
+                      name TEXT NOT NULL UNIQUE,
                       description TEXT)''')
 
         # Create clients table with indexes for search
@@ -34,14 +34,15 @@ def init_db():
         c.execute('''CREATE INDEX IF NOT EXISTS idx_first_name ON clients(first_name)''')
         c.execute('''CREATE INDEX IF NOT EXISTS idx_last_name ON clients(last_name)''')
 
-        # Create enrollments table
+        # Create enrollments table with unique constraint
         c.execute('''CREATE TABLE IF NOT EXISTS enrollments
                      (enrollment_id TEXT PRIMARY KEY,
                       client_id TEXT NOT NULL,
                       program_id TEXT NOT NULL,
                       enrollment_date TEXT NOT NULL,
                       FOREIGN KEY(client_id) REFERENCES clients(client_id),
-                      FOREIGN KEY(program_id) REFERENCES programs(program_id))''')
+                      FOREIGN KEY(program_id) REFERENCES programs(program_id),
+                      UNIQUE(client_id, program_id))''')
 
         conn.commit()
         logging.info("Database initialized with programs, clients, and enrollments tables")
@@ -93,6 +94,12 @@ async def check_db_status():
 async def create_program(name: str, description: str | None) -> str:
     """Create a new program in the database and return its ID."""
     try:
+        # Check for existing program by name
+        query_check = "SELECT program_id FROM programs WHERE name = :name"
+        existing_program = await database.fetch_one(query_check, {"name": name})
+        if existing_program:
+            raise ValueError(f"Program already exists with ID: {existing_program['program_id']}")
+
         program_id = str(uuid4())
         query = """
             INSERT INTO programs (program_id, name, description)
@@ -102,6 +109,9 @@ async def create_program(name: str, description: str | None) -> str:
         await database.execute(query, values)
         logging.info(f"Program created: {program_id}")
         return program_id
+    except ValueError as e:
+        logging.error(f"Program creation failed: {e}")
+        raise
     except Exception as e:
         logging.error(f"Failed to create program: {e}")
         raise
@@ -183,6 +193,15 @@ async def create_enrollment(client_id: str, program_id: str) -> str:
         if not await check_program_exists(program_id):
             raise ValueError("Program does not exist")
 
+        # Check for existing enrollment
+        query_check = """
+            SELECT enrollment_id FROM enrollments
+            WHERE client_id = :client_id AND program_id = :program_id
+        """
+        existing_enrollment = await database.fetch_one(query_check, {"client_id": client_id, "program_id": program_id})
+        if existing_enrollment:
+            raise ValueError(f"Enrollment already exists with ID: {existing_enrollment['enrollment_id']}")
+
         enrollment_id = str(uuid4())
         enrollment_date = datetime.utcnow().isoformat()
         query = """
@@ -198,6 +217,9 @@ async def create_enrollment(client_id: str, program_id: str) -> str:
         await database.execute(query, values)
         logging.info(f"Enrollment created: {enrollment_id}")
         return enrollment_id
+    except ValueError as e:
+        logging.error(f"Enrollment creation failed: {e}")
+        raise
     except Exception as e:
         logging.error(f"Failed to create enrollment: {e}")
         raise
