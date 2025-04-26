@@ -2,10 +2,10 @@ fastapi==0.115.4
 uvicorn==0.32.0
 sqlalchemy==2.0.36
 aiosqlite==0.20.0
-fastapi-users
+fastapi-users==14.0.0
 python-dotenv==1.0.1
 python-jose==3.4.0
 python-multipart==0.0.20
-pyjwt
+pyjwt==2.9.0
 pytest==8.3.3
 pytest-asyncio==0.24.0
