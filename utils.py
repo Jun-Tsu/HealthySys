@@ -1,5 +1,6 @@
 import re
 import logging
+import hashlib
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -14,3 +15,7 @@ def sanitize_input(input_str: str | None) -> str | None:
         return None
     logging.info(f"Sanitized input: {sanitized}")
     return sanitized
+
+def hash_contact(contact: str) -> str:
+    """Hash contact information for secure storage."""
+    return hashlib.sha256(contact.encode()).hexdigest()
