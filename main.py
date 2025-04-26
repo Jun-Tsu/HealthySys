@@ -208,3 +208,6 @@ async def get_client_profile_endpoint(client_id: UUID, current_user: User = Depe
     except Exception as e:
         logging.error(f"Client profile fetch failed: {e}")
         raise HTTPException(status_code=400, detail=f"Failed to fetch client profile: {str(e)}")
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
