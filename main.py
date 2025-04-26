@@ -22,7 +22,6 @@ SECRET = getenv("JWT_SECRET")
 if not SECRET:
     raise ValueError("JWT_SECRET not set in .env")
 
-
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -34,7 +33,7 @@ class User(SQLAlchemyBaseUserTableUUID, Base):
     pass
 
 # Database setup for fastapi-users
-SQLALCHEMY_DATABASE_URL = "sqlite+aiosqlite:///health_system.db"
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./data/health_system.db")
 engine = create_async_engine(SQLALCHEMY_DATABASE_URL, echo=True)
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -208,6 +207,3 @@ async def get_client_profile_endpoint(client_id: UUID, current_user: User = Depe
     except Exception as e:
         logging.error(f"Client profile fetch failed: {e}")
         raise HTTPException(status_code=400, detail=f"Failed to fetch client profile: {str(e)}")
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
