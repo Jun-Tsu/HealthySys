@@ -17,4 +17,6 @@ ENV/
 .idea/
 
 # Misc
-*.log
+*.log.env
+.env
+health_system.db
