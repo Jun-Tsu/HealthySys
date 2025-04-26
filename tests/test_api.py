@@ -5,14 +5,17 @@ from db import database
 from uuid import uuid4
 from datetime import datetime
 
-@pytest.fixture
-async def client():
-    """Create a FastAPI test client and connect to database."""
-    await database.connect()
-    yield TestClient(app)
-    await database.disconnect()
+# Set pytest-asyncio loop scope explicitly
+pytestmark = pytest.mark.asyncio(loop_scope="function")
 
-@pytest.mark.asyncio
+@pytest.fixture
+def client():
+    """Create a FastAPI test client and connect to database."""
+    # Connect to database synchronously for simplicity in tests
+    database.connect().get_loop().run_until_complete(database.connect())
+    yield TestClient(app)
+    database.disconnect().get_loop().run_until_complete(database.disconnect())
+
 async def test_db_status(client):
     """Test the /db-status endpoint to ensure database is available."""
     response = client.get("/db-status")
@@ -21,7 +24,6 @@ async def test_db_status(client):
     assert set(response.json()["tables"]) == {"programs", "clients", "enrollments"}
     assert response.json()["message"] == "Database is initialized and connected"
 
-@pytest.mark.asyncio
 async def test_create_program(client):
     """Test the /api/programs endpoint to create a program."""
     program_data = {"name": "TB Program", "description": "Tuberculosis treatment"}
@@ -37,7 +39,6 @@ async def test_create_program(client):
     assert result["name"] == program_data["name"]
     assert result["description"] == program_data["description"]
 
-@pytest.mark.asyncio
 async def test_create_program_duplicate(client):
     """Test the /api/programs endpoint prevents duplicate program names."""
     program_data = {"name": "TB Program", "description": "Tuberculosis treatment"}
@@ -49,7 +50,6 @@ async def test_create_program_duplicate(client):
     assert response.status_code == 409
     assert "Program already exists" in response.json()["detail"]
 
-@pytest.mark.asyncio
 async def test_create_client(client):
     """Test the /api/clients endpoint to create a client."""
     client_data = {
@@ -77,7 +77,6 @@ async def test_create_client(client):
     assert result["dob"] == client_data["dob"]
     assert result["gender"] == client_data["gender"]
 
-@pytest.mark.asyncio
 async def test_create_client_duplicate(client):
     """Test the /api/clients endpoint prevents duplicate clients."""
     client_data = {
@@ -95,7 +94,6 @@ async def test_create_client_duplicate(client):
     assert response.status_code == 409
     assert "Client already exists" in response.json()["detail"]
 
-@pytest.mark.asyncio
 async def test_create_enrollment(client):
     """Test the /api/enrollments endpoint to enroll a client in a program."""
     # Create a program
@@ -132,7 +130,6 @@ async def test_create_enrollment(client):
     assert result["program_id"] == program_id
     assert result["enrollment_date"]
 
-@pytest.mark.asyncio
 async def test_create_enrollment_duplicate(client):
     """Test the /api/enrollments endpoint prevents duplicate enrollments."""
     # Create a program
@@ -160,7 +157,6 @@ async def test_create_enrollment_duplicate(client):
     assert response.status_code == 409
     assert "Enrollment already exists" in response.json()["detail"]
 
-@pytest.mark.asyncio
 async def test_search_clients(client):
     """Test the /api/clients/search endpoint to search clients by name."""
     # Create a client
@@ -189,7 +185,6 @@ async def test_search_clients(client):
     assert client["contact"] == "jane@example.com"
     assert client["programs"] == []
 
-@pytest.mark.asyncio
 async def test_get_client_profile(client):
     """Test the /api/clients/{client_id} endpoint to get client profile."""
     # Create a program

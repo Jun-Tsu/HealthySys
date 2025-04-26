@@ -1,5 +1,6 @@
 import logging
 from fastapi import FastAPI, HTTPException
+from contextlib import asynccontextmanager
 from db import connect_db, disconnect_db, init_db, check_db_status, create_program, create_client, create_enrollment, search_clients, get_client_profile
 from models import ProgramCreate, ProgramResponse, ClientCreate, ClientResponse, EnrollmentCreate, EnrollmentResponse, SearchRequest
 from utils import sanitize_input, hash_contact
@@ -10,16 +11,17 @@ from datetime import datetime
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-app = FastAPI(title="Health Information System")
-
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Handle startup and shutdown events."""
     init_db()  # Initialize schema
     await connect_db()  # Connect to database
-
-@app.on_event("shutdown")
-async def shutdown_event():
+    logging.info("Application startup complete")
+    yield
     await disconnect_db()  # Disconnect from database
+    logging.info("Application shutdown complete")
+
+app = FastAPI(title="Health Information System", lifespan=lifespan)
 
 @app.get("/")
 async def root():
