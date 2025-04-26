@@ -109,6 +109,26 @@ async def create_program(name: str, description: str | None) -> str:
 async def create_client(first_name: str, last_name: str, dob: str, gender: str, contact: str) -> str:
     """Create a new client in the database and return its ID."""
     try:
+        # Check for existing client with same details
+        query_check = """
+            SELECT client_id FROM clients
+            WHERE first_name = :first_name
+            AND last_name = :last_name
+            AND dob = :dob
+            AND gender = :gender
+            AND contact = :contact
+        """
+        values_check = {
+            "first_name": first_name,
+            "last_name": last_name,
+            "dob": dob,
+            "gender": gender,
+            "contact": contact
+        }
+        existing_client = await database.fetch_one(query_check, values_check)
+        if existing_client:
+            raise ValueError(f"Client already exists with ID: {existing_client['client_id']}")
+
         client_id = str(uuid4())
         created_at = datetime.utcnow().isoformat()
         query = """
@@ -127,6 +147,9 @@ async def create_client(first_name: str, last_name: str, dob: str, gender: str, 
         await database.execute(query, values)
         logging.info(f"Client created: {client_id}")
         return client_id
+    except ValueError as e:
+        logging.error(f"Client creation failed: {e}")
+        raise
     except Exception as e:
         logging.error(f"Failed to create client: {e}")
         raise
