@@ -1,4 +1,5 @@
 Health Information System
+
 A robust, API-first health information system built with FastAPI and SQLite, designed to manage health programs and clients. Deployed on Railway, it features role-based access control (RBAC), audit logging, and secure JWT authentication, addressing the challenge of simulating a healthcare system for doctors to create programs, register/enroll clients, and manage profiles.
 Features
 
