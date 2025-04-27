@@ -1,5 +1,6 @@
 import logging
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, status, Request
+from fastapi.security import OAuth2PasswordBearer
 from contextlib import asynccontextmanager
 from db import connect_db, disconnect_db, init_db, check_db_status, create_program, create_client, create_enrollment, search_clients, get_client_profile
 from models import ProgramCreate, ProgramResponse, ClientCreate, ClientResponse, EnrollmentCreate, EnrollmentResponse, SearchRequest
@@ -13,6 +14,7 @@ from fastapi_users.db import SQLAlchemyUserDatabase, SQLAlchemyBaseUserTableUUID
 from fastapi_users.schemas import BaseUser, BaseUserCreate
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import Column, String, Integer, DateTime, ForeignKey
 from os import getenv
 from dotenv import load_dotenv
 
@@ -25,12 +27,20 @@ if not SECRET:
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# SQLAlchemy User Model
+# SQLAlchemy Models
 class Base(DeclarativeBase):
     pass
 
 class User(SQLAlchemyBaseUserTableUUID, Base):
-    pass
+    role = Column(String, nullable=False, default="viewer")  # Roles: admin, staff, viewer
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, ForeignKey("user.id"), nullable=False)
+    action = Column(String, nullable=False)  # e.g., "create_program", "login"
+    details = Column(String, nullable=True)  # e.g., "Program ID: 90adf394-..."
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 # Database setup for fastapi-users
 SQLALCHEMY_DATABASE_URL = "sqlite+aiosqlite:///health_system.db"
@@ -51,11 +61,16 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, UUID]):
 
     async def on_after_register(self, user: User, request=None):
         logging.info(f"User {user.id} has registered.")
+        async with async_session_maker() as session:
+            audit_log = AuditLog(user_id=str(user.id), action="register", details=f"Email: {user.email}")
+            session.add(audit_log)
+            await session.commit()
 
 async def get_user_manager(user_db=Depends(get_user_db)):
     yield UserManager(user_db)
 
 bearer_transport = BearerTransport(tokenUrl="/auth/jwt/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/jwt/login")
 
 def get_jwt_strategy() -> JWTStrategy:
     return JWTStrategy(secret=SECRET, lifetime_seconds=3600)
@@ -71,8 +86,51 @@ fastapi_users = FastAPIUsers[User, UUID](
     [auth_backend],
 )
 
-get_current_user = fastapi_users.current_user(active=True)
+# Custom get_current_user using OAuth2PasswordBearer
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    user_manager: UserManager = Depends(get_user_manager)
+):
+    if not token:
+        return None
+    try:
+        # Manually decode JWT to get user ID
+        from jwt import decode
+        payload = decode(token, SECRET, algorithms=["HS256"])
+        user_id = payload.get("sub")
+        if not user_id:
+            return None
+        user = await user_manager.get(UUID(user_id))
+        if user and user.is_active:
+            return user
+        return None
+    except Exception as e:
+        logging.error(f"Token validation failed: {e}")
+        return None
 
+# RBAC Dependency
+def require_role(role: str):
+    def role_checker(user: User = Depends(get_current_user)):
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required"
+            )
+        if user.role != role:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Operation requires {role} role"
+            )
+        return user
+    return role_checker
+
+# Audit Logging Helper
+async def log_action(user_id: str, action: str, details: str, session: AsyncSession):
+    audit_log = AuditLog(user_id=user_id, action=action, details=details)
+    session.add(audit_log)
+    await session.commit()
+
+# Lifespan context manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
@@ -85,7 +143,20 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
     logging.info("Application shutdown complete")
 
+# Initialize FastAPI app
 app = FastAPI(title="Health Information System", lifespan=lifespan)
+
+# Middleware for Audit Logging
+@app.middleware("http")
+async def audit_middleware(request: Request, call_next):
+    response = await call_next(request)
+    user = await get_current_user(token=request.headers.get("Authorization", "").replace("Bearer ", ""))
+    if user:
+        async with async_session_maker() as session:
+            action = f"{request.method} {request.url.path}"
+            details = f"Client IP: {request.client.host}"
+            await log_action(str(user.id), action, details, session)
+    return response
 
 # Authentication routes
 app.include_router(
@@ -103,17 +174,31 @@ app.include_router(
 async def root():
     return {"message": "Health System API is running"}
 
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
 @app.get("/db-status")
 async def db_status():
     return await check_db_status()
 
 @app.post("/api/programs", response_model=ProgramResponse, status_code=201)
-async def create_program_endpoint(program: ProgramCreate, current_user: User = Depends(get_current_user)):
+async def create_program_endpoint(
+    program: ProgramCreate,
+    current_user: User = Depends(require_role("admin")),
+    session: AsyncSession = Depends(get_async_session)
+):
     """Create a new health program."""
     try:
         name = sanitize_input(program.name)
         description = sanitize_input(program.description) if program.description else None
         program_id = await create_program(name, description)
+        await log_action(
+            str(current_user.id),
+            "create_program",
+            f"Program ID: {program_id}, Name: {name}",
+            session
+        )
         return {"program_id": program_id, "name": name, "description": description}
     except ValueError as e:
         logging.error(f"Program creation failed: {e}")
@@ -123,7 +208,11 @@ async def create_program_endpoint(program: ProgramCreate, current_user: User = D
         raise HTTPException(status_code=400, detail=f"Failed to create program: {str(e)}")
 
 @app.post("/api/clients", response_model=ClientResponse, status_code=201)
-async def create_client_endpoint(client: ClientCreate, current_user: User = Depends(get_current_user)):
+async def create_client_endpoint(
+    client: ClientCreate,
+    current_user: User = Depends(require_role("staff")),
+    session: AsyncSession = Depends(get_async_session)
+):
     """Register a new client."""
     try:
         first_name = sanitize_input(client.first_name)
@@ -133,6 +222,12 @@ async def create_client_endpoint(client: ClientCreate, current_user: User = Depe
         contact = sanitize_input(client.contact)
         hashed_contact = hash_contact(contact)
         client_id = await create_client(first_name, last_name, dob, gender, hashed_contact)
+        await log_action(
+            str(current_user.id),
+            "create_client",
+            f"Client ID: {client_id}, Name: {first_name} {last_name}",
+            session
+        )
         return {
             "client_id": client_id,
             "first_name": first_name,
@@ -151,10 +246,20 @@ async def create_client_endpoint(client: ClientCreate, current_user: User = Depe
         raise HTTPException(status_code=400, detail=f"Failed to create client: {str(e)}")
 
 @app.post("/api/enrollments", response_model=EnrollmentResponse, status_code=201)
-async def create_enrollment_endpoint(enrollment: EnrollmentCreate, current_user: User = Depends(get_current_user)):
+async def create_enrollment_endpoint(
+    enrollment: EnrollmentCreate,
+    current_user: User = Depends(require_role("staff")),
+    session: AsyncSession = Depends(get_async_session)
+):
     """Enroll a client in a program."""
     try:
         enrollment_id = await create_enrollment(str(enrollment.client_id), str(enrollment.program_id))
+        await log_action(
+            str(current_user.id),
+            "create_enrollment",
+            f"Enrollment ID: {enrollment_id}, Client ID: {enrollment.client_id}, Program ID: {enrollment.program_id}",
+            session
+        )
         return {
             "enrollment_id": enrollment_id,
             "client_id": enrollment.client_id,
@@ -171,11 +276,21 @@ async def create_enrollment_endpoint(enrollment: EnrollmentCreate, current_user:
         raise HTTPException(status_code=400, detail=f"Failed to create enrollment: {str(e)}")
 
 @app.post("/api/clients/search", response_model=List[ClientResponse])
-async def search_clients_endpoint(search: SearchRequest, current_user: User = Depends(get_current_user)):
+async def search_clients_endpoint(
+    search: SearchRequest,
+    current_user: User = Depends(get_current_user),  # Viewer can access
+    session: AsyncSession = Depends(get_async_session)
+):
     """Search clients by first or last name."""
     try:
         search_term = sanitize_input(search.search_term)
         clients = await search_clients(search_term)
+        await log_action(
+            str(current_user.id),
+            "search_clients",
+            f"Search Term: {search_term}, Results: {len(clients)}",
+            session
+        )
         return [
             {
                 "client_id": client["client_id"],
@@ -194,12 +309,22 @@ async def search_clients_endpoint(search: SearchRequest, current_user: User = De
         raise HTTPException(status_code=400, detail=f"Failed to search clients: {str(e)}")
 
 @app.get("/api/clients/{client_id}", response_model=ClientResponse)
-async def get_client_profile_endpoint(client_id: UUID, current_user: User = Depends(get_current_user)):
+async def get_client_profile_endpoint(
+    client_id: UUID,
+    current_user: User = Depends(get_current_user),  # Viewer can access
+    session: AsyncSession = Depends(get_async_session)
+):
     """Get client profile with enrolled programs."""
     try:
         profile = await get_client_profile(str(client_id))
         if not profile:
             raise ValueError("Client not found")
+        await log_action(
+            str(current_user.id),
+            "get_client_profile",
+            f"Client ID: {client_id}",
+            session
+        )
         return profile
     except ValueError as e:
         logging.error(f"Client profile fetch failed: {e}")
