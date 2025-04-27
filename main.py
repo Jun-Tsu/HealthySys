@@ -16,6 +16,7 @@ from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import Column, String, Integer, DateTime, ForeignKey
 from os import getenv
 from dotenv import load_dotenv
+from pydantic import BaseModel
 
 # Load environment variables
 load_dotenv()
@@ -71,7 +72,7 @@ async def get_user_manager(user_db=Depends(get_user_db)):
 bearer_transport = BearerTransport(tokenUrl="/auth/jwt/login")
 
 def get_jwt_strategy() -> JWTStrategy:
-    return JWTStrategy(secret=SECRET, lifetime_seconds=3600)
+    return JWTStrategy(secret=SECRET, lifetime_seconds=3600, token_audience=None)
 
 auth_backend = AuthenticationBackend(
     name="jwt",
@@ -151,6 +152,79 @@ app.include_router(
     prefix="/auth",
     tags=["auth"]
 )
+
+# Set Role Endpoint
+class SetRoleRequest(BaseModel):
+    email: str
+    role: str
+
+@app.post("/api/set-role", status_code=200)
+async def set_user_role(
+    request: SetRoleRequest,
+    current_user: User = Depends(require_role("admin")),
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Update a user's role."""
+    try:
+        email = sanitize_input(request.email)
+        role = sanitize_input(request.role)
+        if role not in ["admin", "staff", "viewer"]:
+            raise ValueError("Invalid role")
+        async with session.begin():
+            result = await session.execute(
+                "UPDATE user SET role = :role WHERE email = :email",
+                {"role": role, "email": email}
+            )
+            if result.rowcount == 0:
+                raise ValueError("User not found")
+            await session.commit()
+        await log_action(
+            str(current_user.id),
+            "set_role",
+            f"User: {email}, New Role: {role}",
+            session
+        )
+        return {"message": f"Role updated for {email} to {role}"}
+    except ValueError as e:
+        logging.error(f"Role update failed: {e}")
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logging.error(f"Role update failed: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to update role: {str(e)}")
+
+# Temporary Init Admin Endpoint
+class InitAdminRequest(BaseModel):
+    email: str
+
+@app.post("/api/init-admin", status_code=200)
+async def init_admin(
+    request: InitAdminRequest,
+    session: AsyncSession = Depends(get_async_session)
+):
+    """Temporarily set a user to admin (one-time use)."""
+    try:
+        email = sanitize_input(request.email)
+        async with session.begin():
+            result = await session.execute(
+                "UPDATE user SET role = 'admin' WHERE email = :email",
+                {"email": email}
+            )
+            if result.rowcount == 0:
+                raise ValueError("User not found")
+            await session.commit()
+        await log_action(
+            "system",
+            "init_admin",
+            f"Set {email} to admin",
+            session
+        )
+        return {"message": f"User {email} set to admin"}
+    except ValueError as e:
+        logging.error(f"Init admin failed: {e}")
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logging.error(f"Init admin failed: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to set admin: {str(e)}")
 
 @app.get("/")
 async def root():
