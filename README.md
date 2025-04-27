@@ -1,5 +1,4 @@
 Health Information System
-
 A robust, API-first health information system built with FastAPI and SQLite, designed to manage health programs and clients. Deployed on Railway, it features role-based access control (RBAC), audit logging, and secure JWT authentication, addressing the challenge of simulating a healthcare system for doctors to create programs, register/enroll clients, and manage profiles.
 Features
 
@@ -120,6 +119,20 @@ View Client Profile:
 curl -X GET "https://web-copy-production-7415.up.railway.app/api/clients/<client-uuid>" \
 -H "Authorization: Bearer <token>"
 
+
+
+Demo Screenshots
+The following screenshots demonstrate key functionalities of the live application:
+
+Program Creation: Admin creates a new health program.
+
+Client Registration: Staff registers a new client.
+
+Client Enrollment: Staff enrolls a client in a program.
+
+Audit Logs: Logs of user actions for security and tracking.
+
+Railway Deployment: Successful program creation on Railway.
 
 
 API Endpoints
@@ -248,6 +261,11 @@ HealthySys/
 ├── HealthySys_Presentation.pptx  # Presentation
 ├── HealthySys_Demo.mp4  # Demo video
 ├── screenshots/       # Demo screenshots
+│   ├── admin_program_success.png
+│   ├── staff_create_client.png
+│   ├── staff_create_enrollment.png
+│   ├── staff_audit_log.png
+│   ├── railway_admin_program_success.png
 └── .env               # Environment variables
 
 Contributing
@@ -261,4 +279,4 @@ Open a pull request.
 License
 MIT License. See LICENSE for details.
 Contact
-For issues or inquiries, contact Jun_tsu at justusobisa5@gmail.com.
+For issues or inquiries, contact [Your Name] at [Your Email].
