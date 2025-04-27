@@ -14,6 +14,7 @@ from fastapi_users.schemas import BaseUser, BaseUserCreate
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import Column, String, Integer, DateTime, ForeignKey
+from sqlalchemy.sql import text
 from os import getenv
 from dotenv import load_dotenv
 from pydantic import BaseModel
@@ -103,13 +104,41 @@ async def log_action(user_id: str, action: str, details: str, session: AsyncSess
     session.add(audit_log)
     await session.commit()
 
-# Lifespan
+# Lifespan with Admin Initialization
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     init_db()
     await connect_db()
+    # Initialize admin user if none exists
+    async with async_session_maker() as session:
+        async with session.begin():
+            result = await session.execute(text("SELECT COUNT(*) FROM user WHERE role = 'admin'"))
+            admin_count = result.scalar()
+            if admin_count == 0:
+                # Create admin@q.com with password admin1234
+                user_manager = UserManager(SQLAlchemyUserDatabase(session, User))
+                try:
+                    admin_user = await user_manager.create(
+                        BaseUserCreate(
+                            email="admin@q.com",
+                            password="admin1234",
+                            is_active=True,
+                            is_superuser=False,
+                            is_verified=False
+                        )
+                    )
+                    # Set role to admin
+                    await session.execute(
+                        text("UPDATE user SET role = 'admin' WHERE email = :email"),
+                        {"email": "admin@q.com"}
+                    )
+                    await session.commit()
+                    logging.info("Created admin user: admin@q.com")
+                    await log_action("system", "init_admin", "Created admin@q.com", session)
+                except Exception as e:
+                    logging.error(f"Failed to create admin user: {e}")
     logging.info("Application startup complete")
     yield
     await disconnect_db()
@@ -123,11 +152,9 @@ app = FastAPI(title="Health Information System", lifespan=lifespan)
 @app.middleware("http")
 async def audit_middleware(request: Request, call_next):
     logging.info(f"Middleware processing: {request.method} {request.url.path}")
-    # Skip authentication for login endpoint
     if request.url.path == "/auth/jwt/login":
         return await call_next(request)
     response = await call_next(request)
-    # Temporarily disable user fetching to avoid auth issues
     user = None
     try:
         user = await get_current_user(request)
@@ -172,7 +199,7 @@ async def set_user_role(
             raise ValueError("Invalid role")
         async with session.begin():
             result = await session.execute(
-                "UPDATE user SET role = :role WHERE email = :email",
+                text("UPDATE user SET role = :role WHERE email = :email"),
                 {"role": role, "email": email}
             )
             if result.rowcount == 0:
@@ -185,7 +212,7 @@ async def set_user_role(
             session
         )
         return {"message": f"Role updated for {email} to {role}"}
-    except ValueError as e:
+    circa ValueError as e:
         logging.error(f"Role update failed: {e}")
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -206,7 +233,7 @@ async def init_admin(
         email = sanitize_input(request.email)
         async with session.begin():
             result = await session.execute(
-                "UPDATE user SET role = 'admin' WHERE email = :email",
+                text("UPDATE user SET role = 'admin' WHERE email = :email"),
                 {"email": email}
             )
             if result.rowcount == 0:
