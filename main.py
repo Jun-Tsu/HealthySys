@@ -1,6 +1,5 @@
 import logging
 from fastapi import FastAPI, HTTPException, Depends, status, Request
-from fastapi.security import OAuth2PasswordBearer
 from contextlib import asynccontextmanager
 from db import connect_db, disconnect_db, init_db, check_db_status, create_program, create_client, create_enrollment, search_clients, get_client_profile
 from models import ProgramCreate, ProgramResponse, ClientCreate, ClientResponse, EnrollmentCreate, EnrollmentResponse, SearchRequest
@@ -38,8 +37,8 @@ class AuditLog(Base):
     __tablename__ = "audit_log"
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String, ForeignKey("user.id"), nullable=False)
-    action = Column(String, nullable=False)  # e.g., "create_program", "login"
-    details = Column(String, nullable=True)  # e.g., "Program ID: 90adf394-..."
+    action = Column(String, nullable=False)
+    details = Column(String, nullable=True)
     timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 # Database setup for fastapi-users
@@ -70,7 +69,6 @@ async def get_user_manager(user_db=Depends(get_user_db)):
     yield UserManager(user_db)
 
 bearer_transport = BearerTransport(tokenUrl="/auth/jwt/login")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/jwt/login")
 
 def get_jwt_strategy() -> JWTStrategy:
     return JWTStrategy(secret=SECRET, lifetime_seconds=3600)
@@ -86,41 +84,15 @@ fastapi_users = FastAPIUsers[User, UUID](
     [auth_backend],
 )
 
-# Custom get_current_user using OAuth2PasswordBearer
-async def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    user_manager: UserManager = Depends(get_user_manager)
-):
-    if not token:
-        return None
-    try:
-        # Manually decode JWT to get user ID
-        from jwt import decode
-        payload = decode(token, SECRET, algorithms=["HS256"])
-        user_id = payload.get("sub")
-        if not user_id:
-            return None
-        user = await user_manager.get(UUID(user_id))
-        if user and user.is_active:
-            return user
-        return None
-    except Exception as e:
-        logging.error(f"Token validation failed: {e}")
-        return None
+get_current_user = fastapi_users.current_user(active=True)
+logging.info("Using fastapi_users.current_user for authentication")
 
 # RBAC Dependency
 def require_role(role: str):
     def role_checker(user: User = Depends(get_current_user)):
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication required"
-            )
+        logging.info(f"Checking role: {role} for user: {user.id}")
         if user.role != role:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Operation requires {role} role"
-            )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Operation requires {role} role")
         return user
     return role_checker
 
@@ -130,7 +102,7 @@ async def log_action(user_id: str, action: str, details: str, session: AsyncSess
     session.add(audit_log)
     await session.commit()
 
-# Lifespan context manager
+# Lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
@@ -143,14 +115,24 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
     logging.info("Application shutdown complete")
 
-# Initialize FastAPI app
+# FastAPI App
 app = FastAPI(title="Health Information System", lifespan=lifespan)
 
 # Middleware for Audit Logging
 @app.middleware("http")
 async def audit_middleware(request: Request, call_next):
+    logging.info(f"Middleware processing: {request.method} {request.url.path}")
+    # Skip authentication for login endpoint
+    if request.url.path == "/auth/jwt/login":
+        return await call_next(request)
     response = await call_next(request)
-    user = await get_current_user(token=request.headers.get("Authorization", "").replace("Bearer ", ""))
+    # Temporarily disable user fetching to avoid auth issues
+    user = None
+    try:
+        user = await get_current_user(request)
+        logging.info(f"Middleware user: {user.id}")
+    except Exception as e:
+        logging.info(f"Middleware: No user authenticated or error: {str(e)}")
     if user:
         async with async_session_maker() as session:
             action = f"{request.method} {request.url.path}"
@@ -278,7 +260,7 @@ async def create_enrollment_endpoint(
 @app.post("/api/clients/search", response_model=List[ClientResponse])
 async def search_clients_endpoint(
     search: SearchRequest,
-    current_user: User = Depends(get_current_user),  # Viewer can access
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Search clients by first or last name."""
@@ -311,7 +293,7 @@ async def search_clients_endpoint(
 @app.get("/api/clients/{client_id}", response_model=ClientResponse)
 async def get_client_profile_endpoint(
     client_id: UUID,
-    current_user: User = Depends(get_current_user),  # Viewer can access
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session)
 ):
     """Get client profile with enrolled programs."""
