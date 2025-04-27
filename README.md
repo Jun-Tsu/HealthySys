@@ -250,24 +250,43 @@ Live Demo: https://web-copy-production-7415.up.railway.app
 
 Project Structure
 HealthySys/
+
 ├── main.py             # FastAPI app with endpoints
+
 ├── db.py              # Database operations
+
 ├── models.py          # Pydantic and SQLAlchemy models
+
 ├── utils.py           # Sanitization and hashing utilities
+
 ├── requirements.txt   # Dependencies
+
 ├── Procfile           # Railway deployment config
+
 ├── health_system.db   # SQLite database
+
 ├── test_main.py       # Unit tests
+
 ├── HealthySys_Presentation.md  # PowerPoint source
+
 ├── HealthySys_Presentation.pptx  # Presentation
+
 ├── HealthySys_Demo.mp4  # Demo video
+
 ├── screenshots/       # Demo screenshots
+
 │   ├── admin_program_success.png
+
 │   ├── staff_create_client.png
+
 │   ├── staff_create_enrollment.png
+
 │   ├── staff_audit_log.png
+
 │   ├── railway_admin_program_success.png
+
 └── .env               # Environment variables
+
 
 Contributing
 
