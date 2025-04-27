@@ -110,12 +110,10 @@ async def log_action(user_id: str, action: str, details: str, session: AsyncSess
 # Lifespan with Admin Initialization
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Check if tables exist before creating
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all, checkfirst=True)
     init_db()
     await connect_db()
-    # Initialize admin user if none exists
     async with async_session_maker() as session:
         async with session.begin():
             result = await session.execute(text("SELECT COUNT(*) FROM user WHERE role = 'admin'"))
@@ -269,10 +267,8 @@ async def upload_db(file: UploadFile = File(...), current_user: User = Depends(r
     """Upload a database file."""
     db_path = "health_system.db"
     try:
-        # Backup existing database
         if os.path.exists(db_path):
             shutil.copy(db_path, f"{db_path}.bak")
-        # Save uploaded file
         with open(db_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         async with async_session_maker() as session:
