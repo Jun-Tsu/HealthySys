@@ -1,5 +1,6 @@
 import logging
-from fastapi import FastAPI, HTTPException, Depends, status, Request
+from fastapi import FastAPI, HTTPException, Depends, status, Request, UploadFile, File
+from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 from db import connect_db, disconnect_db, init_db, check_db_status, create_program, create_client, create_enrollment, search_clients, get_client_profile
 from models import ProgramCreate, ProgramResponse, ClientCreate, ClientResponse, EnrollmentCreate, EnrollmentResponse, SearchRequest
@@ -18,6 +19,8 @@ from sqlalchemy.sql import text
 from os import getenv
 from dotenv import load_dotenv
 from pydantic import BaseModel
+import os
+import shutil
 
 # Load environment variables
 load_dotenv()
@@ -107,8 +110,9 @@ async def log_action(user_id: str, action: str, details: str, session: AsyncSess
 # Lifespan with Admin Initialization
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Check if tables exist before creating
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(Base.metadata.create_all, checkfirst=True)
     init_db()
     await connect_db()
     # Initialize admin user if none exists
@@ -117,7 +121,6 @@ async def lifespan(app: FastAPI):
             result = await session.execute(text("SELECT COUNT(*) FROM user WHERE role = 'admin'"))
             admin_count = result.scalar()
             if admin_count == 0:
-                # Create admin@q.com with password admin1234
                 user_manager = UserManager(SQLAlchemyUserDatabase(session, User))
                 try:
                     admin_user = await user_manager.create(
@@ -129,7 +132,6 @@ async def lifespan(app: FastAPI):
                             is_verified=False
                         )
                     )
-                    # Set role to admin
                     await session.execute(
                         text("UPDATE user SET role = 'admin' WHERE email = :email"),
                         {"email": "admin@q.com"}
@@ -212,7 +214,7 @@ async def set_user_role(
             session
         )
         return {"message": f"Role updated for {email} to {role}"}
-    circa ValueError as e:
+    except ValueError as e:
         logging.error(f"Role update failed: {e}")
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -252,6 +254,35 @@ async def init_admin(
     except Exception as e:
         logging.error(f"Init admin failed: {e}")
         raise HTTPException(status_code=400, detail=f"Failed to set admin: {str(e)}")
+
+# Temporary Database Upload/Download Endpoints
+@app.get("/api/download-db", status_code=200)
+async def download_db(current_user: User = Depends(require_role("admin"))):
+    """Download the database file."""
+    db_path = "health_system.db"
+    if not os.path.exists(db_path):
+        raise HTTPException(status_code=404, detail="Database file not found")
+    return FileResponse(db_path, filename="health_system.db")
+
+@app.post("/api/upload-db", status_code=200)
+async def upload_db(file: UploadFile = File(...), current_user: User = Depends(require_role("admin"))):
+    """Upload a database file."""
+    db_path = "health_system.db"
+    try:
+        # Backup existing database
+        if os.path.exists(db_path):
+            shutil.copy(db_path, f"{db_path}.bak")
+        # Save uploaded file
+        with open(db_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        async with async_session_maker() as session:
+            await log_action(str(current_user.id), "upload_db", f"Uploaded new database: {file.filename}", session)
+        return {"message": "Database uploaded successfully"}
+    except Exception as e:
+        logging.error(f"Database upload failed: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to upload database: {str(e)}")
+    finally:
+        file.file.close()
 
 @app.get("/")
 async def root():
