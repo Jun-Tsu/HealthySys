@@ -64,6 +64,7 @@ Database Initialization
 The app initializes health_system.db on startup.
 Default admin: mary@q.com (password: z8jv6).
 Default staff: john@q.com (password: 1234).
+viewer :peter@q.com Pass 1234
 
 Access Details
 Test the live application at https://web-copy-production-7415.up.railway.app. Use the OpenAPI docs at https://web-copy-production-7415.up.railway.app/docs for interactive testing.
