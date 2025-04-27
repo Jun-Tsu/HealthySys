@@ -1,8 +1,11 @@
 Health Information System
+
 A robust, API-first health information system built with FastAPI and SQLite, designed to manage health programs and clients. Deployed on Railway, it features role-based access control (RBAC), audit logging, and secure JWT authentication, addressing the challenge of simulating a healthcare system for doctors to create programs, register/enroll clients, and manage profiles.
 Features
 
-Health Program Management: Admins create programs (e.g., TB, Malaria, HIV) with name and description.
+Health Program Management:
+
+Admins create programs (e.g., TB, Malaria, HIV) with name and description.
 Client Registration: Staff register clients with personal details (name, DOB, gender, contact).
 Program Enrollment: Staff enroll clients in one or more programs.
 Client Search: All users search clients by name.
@@ -10,7 +13,7 @@ Client Profile: View client details and enrolled programs via API.
 RBAC: Roles (admin, staff, viewer) restrict access to endpoints.
 Security: JWT authentication, input sanitization, contact hashing, audit logging.
 Deployment: Live on Railway with persistent SQLite database.
-Demo: Presentation (HealthySys_Presentation.pptx) and video (HealthySys_Demo.mp4) showcase functionality.
+Demo: Presentation (Presentation.pptx) and video (HealthySys_Demo.mp4) showcase functionality.
 
 Tech Stack
 
@@ -76,7 +79,6 @@ Email: john@q.com
 Password: 1234
 
 
-
 Testing with cURL
 
 Login (Get JWT Token):
@@ -118,7 +120,6 @@ curl -X POST "https://web-copy-production-7415.up.railway.app/api/clients/search
 View Client Profile:
 curl -X GET "https://web-copy-production-7415.up.railway.app/api/clients/<client-uuid>" \
 -H "Authorization: Bearer <token>"
-
 
 
 Demo Screenshots
@@ -243,7 +244,7 @@ Temporary Endpoints: /upload-db, /download-db, /init-admin used for database man
 
 Demo
 
-Presentation: HealthySys_Presentation.pptx details approach, design, and results (see Slide 8 for demo).
+Presentation: Presentation.pptx details approach, design, and results.
 Video: HealthySys_Demo.mp4 shows login, database upload, role changes, and program creation.
 Live Demo: https://web-copy-production-7415.up.railway.app
 
@@ -279,4 +280,4 @@ Open a pull request.
 License
 MIT License. See LICENSE for details.
 Contact
-For issues or inquiries, contact [Your Name] at [Your Email].
+For issues or inquiries, contact JUN_TSU at justusobisa5@gmail.com.
